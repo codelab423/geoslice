@@ -3,6 +3,7 @@ import CountryMap from '../components/CountryMap';
 import TopBar from '../components/TopBar';
 import ResultPanel from '../components/ResultPanel';
 import { useCountryData } from '../hooks/useCountryData';
+import { useCityData } from '../hooks/useCityData';
 import { useSplitEngine } from '../hooks/useSplitEngine';
 import { useStats } from '../hooks/useStats';
 import { requireCountry } from '../data/countries';
@@ -63,6 +64,7 @@ export default function GameScreen({ mode, onExit, forcedCountry }: Props) {
   const [aIsLeft, setAIsLeft] = useState(true);
 
   const dataState = useCountryData(currentIso3);
+  const cities = useCityData(currentIso3);
   const { calculateSync, calculateLive } = useSplitEngine(
     dataState.status === 'ready' ? dataState.population! : null,
     settings.scoringCurve
@@ -244,6 +246,8 @@ export default function GameScreen({ mode, onExit, forcedCountry }: Props) {
             showPopulationHeatmap={showPopulationHeatmap}
             hardcoreMode={hardcoreMode}
             drawMode={settings.drawMode}
+            cities={cities}
+            showCities={settings.showCities}
           />
         )}
         {dataState.status === 'loading' && (
@@ -340,10 +344,35 @@ export default function GameScreen({ mode, onExit, forcedCountry }: Props) {
         </div>
       )}
 
+      {!hardcoreMode && (
+        <label
+          style={{
+            position: 'absolute',
+            bottom: 'calc(200px + var(--safe-bottom))',
+            right: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: '0.75rem',
+            color: 'var(--text-faint)',
+            background: 'rgba(11,14,20,0.6)',
+            padding: '4px 8px',
+            borderRadius: 8,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={settings.showCities}
+            onChange={(e) => updateSettings({ showCities: e.target.checked })}
+          />
+          Cities
+        </label>
+      )}
+
       <label
         style={{
           position: 'absolute',
-          bottom: 'calc(200px + var(--safe-bottom))',
+          bottom: 'calc(164px + var(--safe-bottom))',
           right: 16,
           display: 'flex',
           alignItems: 'center',

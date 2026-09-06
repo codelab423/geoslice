@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
 import type { Feature, Polygon, MultiPolygon } from 'geojson';
-import type { DrawMode, PopulationDataFile, SplitLine } from '../types';
+import type { CityLabel, DrawMode, PopulationDataFile, SplitLine } from '../types';
 import { clipLineToRect } from '../map/lineGeometry';
 import { splitPolygonByLine } from '../map/splitVisualization';
 
@@ -38,6 +38,9 @@ interface Props {
    *  point B, and they're connected automatically. Both are always implemented;
    *  this only selects which one the current pointer gestures drive. */
   drawMode: DrawMode;
+  /** Decorative-only city labels (see CityLabel) -- never affects scoring. */
+  cities: CityLabel[];
+  showCities: boolean;
 }
 
 const LEFT_COLOR = '#ff6b6b';
@@ -64,6 +67,8 @@ export default function CountryMap({
   showPopulationHeatmap,
   hardcoreMode,
   drawMode,
+  cities,
+  showCities,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -217,6 +222,51 @@ export default function CountryMap({
     }
     map.setPaintProperty('population-heatmap', 'heatmap-opacity', showPopulationHeatmap ? 0.65 : 0);
   }, [population, showPopulationHeatmap, ready]);
+
+  // City labels: plain HTML markers (dot + name) rather than a MapLibre
+  // symbol/text-field layer, since text-field rendering needs a `glyphs`
+  // font-tile endpoint configured in the style -- and this app deliberately
+  // has no external tile/API dependency at all. Markers are pointer-events:
+  // none so they never steal the draw gesture from the canvas underneath.
+  const cityMarkersRef = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    cityMarkersRef.current.forEach((m) => m.remove());
+    cityMarkersRef.current = [];
+
+    if (!showCities || hardcoreMode) return;
+
+    for (const city of cities) {
+      const el = document.createElement('div');
+      el.style.cssText =
+        'display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap;';
+
+      const dot = document.createElement('span');
+      dot.style.cssText =
+        'width:6px;height:6px;border-radius:50%;background:#8ecbff;' +
+        'box-shadow:0 0 0 2px rgba(5,7,12,0.55);flex-shrink:0;';
+
+      const label = document.createElement('span');
+      label.style.cssText =
+        'font-size:11px;font-weight:600;color:#bcdcff;text-shadow:0 1px 3px rgba(0,0,0,0.9);';
+      label.textContent = city.name;
+
+      el.appendChild(dot);
+      el.appendChild(label);
+
+      const marker = new maplibregl.Marker({ element: el, anchor: 'left' })
+        .setLngLat([city.lon, city.lat])
+        .addTo(map);
+      cityMarkersRef.current.push(marker);
+    }
+
+    return () => {
+      cityMarkersRef.current.forEach((m) => m.remove());
+      cityMarkersRef.current = [];
+    };
+  }, [cities, showCities, hardcoreMode, ready]);
 
   // Draw (or clear) the split line + side coloring whenever `line` changes.
   useEffect(() => {
