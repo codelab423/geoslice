@@ -21,6 +21,18 @@ export interface CountryMeta {
   territoryExtent: TerritoryExtent;
 }
 
+/**
+ * A major city label, from Natural Earth's public-domain populated places
+ * dataset. Decorative only -- never fed into PopulationSplitEngine, which
+ * always scores from the WorldPop grid (see PopulationDataFile below).
+ */
+export interface CityLabel {
+  name: string;
+  lon: number;
+  lat: number;
+  population: number;
+}
+
 /** A single aggregated population grid cell, produced by the Python preprocessing pipeline. */
 export interface PopulationPoint {
   lon: number;
