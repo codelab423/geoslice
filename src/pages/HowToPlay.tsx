@@ -13,8 +13,11 @@ export default function HowToPlay({ onBack }: Props) {
           it that splits the country's <strong>population</strong> as close to 50% / 50% as possible.
         </p>
         <p>
-          Click and drag (or touch and drag on mobile) across the map to draw your line — it extends
-          automatically to the edges of the map. When you're happy with it, press <strong>SUBMIT SPLIT</strong>.
+          Two ways to draw: <strong>Drag</strong> — click/touch and drag across the map, the line
+          extends automatically to the edges. <strong>Two points</strong> — tap one point, then
+          tap another, and they're connected into a line for you. Switch between them anytime with
+          the toggle near the bottom of the map. When you're happy with your line, press{' '}
+          <strong>SUBMIT SPLIT</strong>.
         </p>
         <p>
           The catch: population isn't spread evenly across a country. A line through the geographic

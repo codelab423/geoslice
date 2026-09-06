@@ -73,11 +73,16 @@ export type GameModeId =
   | 'streak'
   | 'hardcore';
 
+/** How the player creates their split line on the map. Both are always available
+ *  side by side; this only picks which one is currently active. */
+export type DrawMode = 'drag' | 'points';
+
 export interface GameSettings {
   liveMode: boolean;
   hardcoreMode: boolean;
   showCities: boolean;
   scoringCurve: 'linear' | 'exponential';
+  drawMode: DrawMode;
 }
 
 export interface RoundRecord {

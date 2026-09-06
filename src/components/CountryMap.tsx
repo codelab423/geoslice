@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
 import type { Feature, Polygon, MultiPolygon } from 'geojson';
-import type { PopulationDataFile, SplitLine } from '../types';
+import type { DrawMode, PopulationDataFile, SplitLine } from '../types';
 import { clipLineToRect } from '../map/lineGeometry';
 import { splitPolygonByLine } from '../map/splitVisualization';
 
@@ -18,6 +18,7 @@ const SOURCE_LINE = 'split-line';
 const SOURCE_SIDE_A = 'side-a';
 const SOURCE_SIDE_B = 'side-b';
 const SOURCE_POP = 'population-points';
+const SOURCE_TAP_POINTS = 'tap-points';
 
 const EMPTY_FC = turf.featureCollection([]);
 
@@ -33,10 +34,24 @@ interface Props {
   sideALabel: 'left' | 'right';
   showPopulationHeatmap: boolean;
   hardcoreMode: boolean;
+  /** 'drag': press-drag-release draws the line. 'points': tap point A, then tap
+   *  point B, and they're connected automatically. Both are always implemented;
+   *  this only selects which one the current pointer gestures drive. */
+  drawMode: DrawMode;
 }
 
 const LEFT_COLOR = '#ff6b6b';
 const RIGHT_COLOR = '#4ecdc4';
+
+/** A point the player has tapped in 'points' mode, kept in both pixel space
+ *  (to feed clipLineToRect, same as the drag path) and lon/lat (for the marker
+ *  source and for handing off to onLineChange). */
+interface TapPoint {
+  x: number;
+  y: number;
+  lon: number;
+  lat: number;
+}
 
 export default function CountryMap({
   boundary,
@@ -48,6 +63,7 @@ export default function CountryMap({
   sideALabel,
   showPopulationHeatmap,
   hardcoreMode,
+  drawMode,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -141,6 +157,21 @@ export default function CountryMap({
         },
       });
 
+      // Point-to-point mode markers: point A and point B stay visible on the
+      // map (distinct colors) once tapped, on top of everything else.
+      map.addSource(SOURCE_TAP_POINTS, { type: 'geojson', data: EMPTY_FC as any });
+      map.addLayer({
+        id: 'tap-points',
+        type: 'circle',
+        source: SOURCE_TAP_POINTS,
+        paint: {
+          'circle-radius': 7,
+          'circle-color': ['match', ['get', 'role'], 'a', '#4f8dff', 'b', '#eef1f8', '#4f8dff'],
+          'circle-stroke-color': '#05070c',
+          'circle-stroke-width': 2,
+        },
+      });
+
       setReady(true);
     });
 
@@ -165,6 +196,8 @@ export default function CountryMap({
     (map.getSource(SOURCE_LINE) as maplibregl.GeoJSONSource)?.setData(EMPTY_FC as any);
     (map.getSource(SOURCE_SIDE_A) as maplibregl.GeoJSONSource)?.setData(EMPTY_FC as any);
     (map.getSource(SOURCE_SIDE_B) as maplibregl.GeoJSONSource)?.setData(EMPTY_FC as any);
+    (map.getSource(SOURCE_TAP_POINTS) as maplibregl.GeoJSONSource)?.setData(EMPTY_FC as any);
+    tapPointsRef.current = { a: null, b: null };
 
     const bbox = turf.bbox(boundary as any) as [number, number, number, number];
     map.fitBounds(bbox, { padding: 48, animate: false, maxZoom: 8 });
@@ -197,6 +230,10 @@ export default function CountryMap({
       lineSource?.setData(EMPTY_FC as any);
       sideASource?.setData(EMPTY_FC as any);
       sideBSource?.setData(EMPTY_FC as any);
+      // An external reset (TRY AGAIN / NEXT COUNTRY) clears the line -- make
+      // sure any in-progress point-mode taps are cleared with it.
+      tapPointsRef.current = { a: null, b: null };
+      (map.getSource(SOURCE_TAP_POINTS) as maplibregl.GeoJSONSource)?.setData(EMPTY_FC as any);
       return;
     }
 
@@ -222,7 +259,10 @@ export default function CountryMap({
     }
   }, [line, locked, resultRevealed, boundary, ready, sideALabel]);
 
-  const handlePointerMove = useCallback((clientX: number, clientY: number, isStart: boolean) => {
+  // --- Drag mode: press, drag, release -----------------------------------
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleDragMove = useCallback((clientX: number, clientY: number, isStart: boolean) => {
     const map = mapRef.current;
     if (!map || lockedRef.current) return;
     const canvas = map.getCanvas();
@@ -231,10 +271,10 @@ export default function CountryMap({
     const y = clientY - rect.top;
 
     if (isStart) {
-      startRef.current = { x, y };
+      dragStartRef.current = { x, y };
       return;
     }
-    const start = startRef.current;
+    const start = dragStartRef.current;
     if (!start) return;
 
     const clipped = clipLineToRect(start.x, start.y, x, y, rect.width, rect.height);
@@ -245,47 +285,119 @@ export default function CountryMap({
     onLineChangeRef.current({ p1: [ll1.lng, ll1.lat], p2: [ll2.lng, ll2.lat] });
   }, []);
 
-  const startRef = useRef<{ x: number; y: number } | null>(null);
+  // --- Point-to-point mode: tap A, tap B, they're connected ---------------
+  const tapPointsRef = useRef<{ a: TapPoint | null; b: TapPoint | null }>({ a: null, b: null });
+
+  const renderTapMarkers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const { a, b } = tapPointsRef.current;
+    const features = [];
+    if (a) features.push(turf.point([a.lon, a.lat], { role: 'a' }));
+    if (b) features.push(turf.point([b.lon, b.lat], { role: 'b' }));
+    (map.getSource(SOURCE_TAP_POINTS) as maplibregl.GeoJSONSource)?.setData(
+      turf.featureCollection(features) as any
+    );
+  }, []);
+
+  const handleTap = useCallback((clientX: number, clientY: number) => {
+    const map = mapRef.current;
+    if (!map || lockedRef.current) return;
+    const canvas = map.getCanvas();
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const ll = map.unproject([x, y] as any);
+    const tapped: TapPoint = { x, y, lon: ll.lng, lat: ll.lat };
+
+    const pts = tapPointsRef.current;
+    if (!pts.a || pts.b) {
+      // First tap ever, or re-tapping after a completed A/B pair -- start fresh.
+      tapPointsRef.current = { a: tapped, b: null };
+      onLineChangeRef.current(null);
+      renderTapMarkers();
+      return;
+    }
+
+    // pts.a is set, pts.b is not: this tap places point B.
+    const clipped = clipLineToRect(pts.a.x, pts.a.y, x, y, rect.width, rect.height);
+    if (!clipped) {
+      // Degenerate (tapped essentially the same spot as A) -- keep waiting for a real point B.
+      return;
+    }
+    tapPointsRef.current = { a: pts.a, b: tapped };
+    renderTapMarkers();
+    const [p1, p2] = clipped;
+    const ll1 = map.unproject(p1 as any);
+    const ll2 = map.unproject(p2 as any);
+    onLineChangeRef.current({ p1: [ll1.lng, ll1.lat], p2: [ll2.lng, ll2.lat] });
+  }, [renderTapMarkers]);
+
+  // Switching modes starts fresh, so a half-finished gesture in one mode
+  // never lingers into the other.
+  useEffect(() => {
+    dragStartRef.current = null;
+    tapPointsRef.current = { a: null, b: null };
+    renderTapMarkers();
+  }, [drawMode, renderTapMarkers]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     const canvas = map.getCanvas();
+    // touch-action: none hands the browser's default touch gestures (scroll,
+    // swipe-back, pinch-zoom) entirely over to our pointer handlers below, on
+    // both drag and point-to-point modes.
     canvas.style.touchAction = 'none';
     canvas.style.cursor = locked ? 'default' : 'crosshair';
 
-    const onPointerDown = (e: PointerEvent) => {
-      if (lockedRef.current) return;
-      draggingRef.current = true;
-      canvas.setPointerCapture(e.pointerId);
-      handlePointerMove(e.clientX, e.clientY, true);
-    };
-    const onPointerMove = (e: PointerEvent) => {
-      if (!draggingRef.current) return;
-      e.preventDefault();
-      handlePointerMove(e.clientX, e.clientY, false);
-    };
-    const endDrag = (e: PointerEvent) => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {
-        /* noop */
-      }
-    };
+    if (drawMode === 'drag') {
+      const onPointerDown = (e: PointerEvent) => {
+        if (lockedRef.current) return;
+        e.preventDefault();
+        draggingRef.current = true;
+        canvas.setPointerCapture(e.pointerId);
+        handleDragMove(e.clientX, e.clientY, true);
+      };
+      const onPointerMove = (e: PointerEvent) => {
+        if (!draggingRef.current) return;
+        e.preventDefault();
+        handleDragMove(e.clientX, e.clientY, false);
+      };
+      const endDrag = (e: PointerEvent) => {
+        if (!draggingRef.current) return;
+        draggingRef.current = false;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch {
+          /* noop */
+        }
+      };
 
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', endDrag);
-    canvas.addEventListener('pointercancel', endDrag);
-    return () => {
-      canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', endDrag);
-      canvas.removeEventListener('pointercancel', endDrag);
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', endDrag);
+      canvas.addEventListener('pointercancel', endDrag);
+      return () => {
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        canvas.removeEventListener('pointermove', onPointerMove);
+        canvas.removeEventListener('pointerup', endDrag);
+        canvas.removeEventListener('pointercancel', endDrag);
+      };
+    }
+
+    // drawMode === 'points': a tap is a full pointerdown without a drag, so a
+    // single 'pointerdown' listener is enough -- no move/up tracking needed.
+    const onPointerDownTap = (e: PointerEvent) => {
+      if (lockedRef.current) return;
+      e.preventDefault();
+      handleTap(e.clientX, e.clientY);
     };
-  }, [ready, locked, handlePointerMove]);
+    canvas.addEventListener('pointerdown', onPointerDownTap);
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDownTap);
+    };
+  }, [ready, locked, drawMode, handleDragMove, handleTap]);
 
   return (
     <div
