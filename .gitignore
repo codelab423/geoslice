@@ -1,0 +1,18 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Python preprocessing
+scripts/__pycache__/
+scripts/.venv/
+*.pyc
+
+# large raw source rasters cached during data build - never commit these
+data-cache/
+
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
