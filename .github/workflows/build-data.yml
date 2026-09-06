@@ -1,0 +1,74 @@
+name: Build real game data (boundaries + WorldPop population)
+
+# Runs the Python preprocessing pipeline on a normal GitHub-hosted runner,
+# which has ordinary internet access to geoBoundaries and WorldPop -- unlike
+# some restricted-egress sandboxes, so this is where the real data actually
+# gets built and committed. See scripts/build_population.py and
+# scripts/fetch_boundaries.py for the pipeline itself.
+on:
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Space-separated ISO3 codes to (re)build, or "all"'
+        required: false
+        default: 'all'
+  schedule:
+    # Monthly refresh in case upstream sources update their files.
+    - cron: '0 4 1 * *'
+
+permissions:
+  contents: write
+
+jobs:
+  build-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Fetch country boundaries (geoBoundaries)
+        run: |
+          if [ "${{ github.event.inputs.countries }}" = "all" ] || [ -z "${{ github.event.inputs.countries }}" ]; then
+            python scripts/fetch_boundaries.py --all
+          else
+            python scripts/fetch_boundaries.py ${{ github.event.inputs.countries }}
+          fi
+
+      - name: Build population data (WorldPop)
+        run: |
+          if [ "${{ github.event.inputs.countries }}" = "all" ] || [ -z "${{ github.event.inputs.countries }}" ]; then
+            python scripts/build_population.py --all
+          else
+            python scripts/build_population.py ${{ github.event.inputs.countries }}
+          fi
+
+      - name: Run data pipeline unit + smoke tests
+        run: python -m pytest scripts/ -v
+
+      - name: Validate all data (Node)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run validate-data
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/countries public/population
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "data: rebuild country boundaries + WorldPop population grids"
+            git push
+          fi
