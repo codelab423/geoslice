@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    # A push made by build-data.yml's own commit step (using the default
+    # GITHUB_TOKEN) does NOT trigger other workflows -- that's a deliberate
+    # GitHub Actions anti-loop rule. This picks it up explicitly instead of
+    # requiring a manual re-run every time real data gets rebuilt.
+    workflows: ['Build real game data (boundaries + WorldPop population)']
+    types: [completed]
 
 permissions:
   contents: read
@@ -17,6 +24,9 @@ concurrency:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    # Skip if this run was triggered by a failed/cancelled build-data.yml --
+    # only a successful data rebuild should trigger a redeploy.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
 
