@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   hardcoreMode: false,
   showCities: true,
   scoringCurve: 'linear',
+  drawMode: 'drag',
 };
 
 function defaultStats(): StoredStatsV1 {

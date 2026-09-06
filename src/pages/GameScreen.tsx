@@ -243,6 +243,7 @@ export default function GameScreen({ mode, onExit, forcedCountry }: Props) {
             sideALabel={aIsLeft ? 'left' : 'right'}
             showPopulationHeatmap={showPopulationHeatmap}
             hardcoreMode={hardcoreMode}
+            drawMode={settings.drawMode}
           />
         )}
         {dataState.status === 'loading' && (
@@ -300,6 +301,43 @@ export default function GameScreen({ mode, onExit, forcedCountry }: Props) {
           onShare={handleShare}
           shareCopied={shareCopied}
         />
+      )}
+
+      {phase === 'drawing' && (
+        <div
+          role="group"
+          aria-label="Line drawing method"
+          style={{
+            position: 'absolute',
+            bottom: 'calc(236px + var(--safe-bottom))',
+            right: 16,
+            display: 'flex',
+            gap: 2,
+            fontSize: '0.72rem',
+            color: 'var(--text-dim)',
+            background: 'rgba(11,14,20,0.7)',
+            padding: 3,
+            borderRadius: 8,
+          }}
+        >
+          {(['drag', 'points'] as const).map((mode_) => (
+            <button
+              key={mode_}
+              onClick={() => updateSettings({ drawMode: mode_ })}
+              style={{
+                border: 'none',
+                borderRadius: 6,
+                padding: '5px 10px',
+                cursor: 'pointer',
+                fontWeight: 700,
+                background: settings.drawMode === mode_ ? 'var(--accent)' : 'transparent',
+                color: settings.drawMode === mode_ ? '#05070c' : 'var(--text-dim)',
+              }}
+            >
+              {mode_ === 'drag' ? 'Drag' : 'Two points'}
+            </button>
+          ))}
+        </div>
       )}
 
       <label
